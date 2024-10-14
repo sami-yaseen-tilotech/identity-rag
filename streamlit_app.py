@@ -4,18 +4,11 @@ import requests
 import tempfile
 import os
 import streamlit as st
-
-# Show title and description.
-st.title("💬 IdentityRAG using Tilores")
-st.write(
-    "This is a simple chatbot that uses OpenAI's GPT-3.5 model to generate responses. "
-    "To use this app, you need to provide an OpenAI API key, which you can get [here](https://platform.openai.com/account/api-keys). "
-    "You can also learn how to build this app step by step by [following our tutorial](https://docs.streamlit.io/develop/tutorials/llms/build-conversational-apps)."
-)
+import asyncio
 
 # LangChain
 from langchain.tools import BaseTool
-from langchain_core.messages import AnyMessage, HumanMessage
+from langchain_core.messages import AnyMessage, HumanMessage, AIMessage
 from langchain_openai import ChatOpenAI
 from langchain_aws import ChatBedrock
 
@@ -28,6 +21,26 @@ from langchain.tools import Tool
 # Tilores
 from tilores import TiloresAPI
 from langchain_tilores import TiloresTools
+
+# Show title and description.
+st.title("💬 IdentityRAG using Tilores")
+st.write(
+    "This demo demonstrates how connecting an LLM to Tilores, an entity resolution system, "
+    "via IdentityRAG improves data analysis by resolving ambiguities. "
+    "Tilores identifies and merges duplicate or inconsistent records, "
+    "while the LLM provides accurate insights using the clean, disambiguated data. "
+    "This approach leads to more precise and context-aware analysis."
+)
+st.write(
+    "Want to use your own data? setup your own [here](https://app.tilores.io)."
+)
+st.write(
+    "Or reach out to us by email: identityrag@tilores.io or use the chat on [tilores.io](https://tilores.io/RAG)"
+)
+
+st.write(
+    "We will help you setup your own app while keeping your data secured."
+)
 
 class HumanInputStreamlit(BaseTool):
     """Tool that adds the capability to ask user for input."""
@@ -54,77 +67,81 @@ def initialize_session():
     if 'runnable' not in st.session_state:
         if os.environ.get("LLM_PROVIDER") == "Bedrock":
             llm = ChatBedrock(
-                credentials_profile_name=os.environ["BEDROCK_CREDENTIALS_PROFILE_NAME"],
+                credentials_profile_name=None,
+                aws_access_key_id=os.environ["AWS_ACCESS_KEY_ID"],
+                aws_secret_access_key=os.environ["AWS_SECRET_ACCESS_KEY"],
+                aws_session_token=os.environ["AWS_SESSION_TOKEN"],
                 region_name=os.environ["BEDROCK_REGION"],
                 model_id=os.environ["BEDROCK_MODEL_ID"],
                 streaming=True,
                 model_kwargs={"temperature": 0},
             )
         else:
-            model_name = "gpt-4-mini"
+            model_name = "gpt-4o-mini"
             if os.environ.get("OPENAI_MODEL_NAME"):
                 model_name = os.environ.get("OPENAI_MODEL_NAME")
             llm = ChatOpenAI(temperature=0, streaming=True, model_name=model_name)
         
-        # Setup a connection to the Tilores instance and provide it as a tool
         tilores = TiloresAPI.from_environ()
         tilores_tools = TiloresTools(tilores)
         tools = [
             HumanInputStreamlit(),
             tilores_tools.search_tool(),
-            # Note: pdf_tool is not defined in the original code, so I've commented it out
-            # pdf_tool,
         ]
-        # Use MemorySaver to use the full conversation
         memory = MemorySaver()
-        # Use a LangGraph agent
         agent = create_react_agent(llm, tools, checkpointer=memory)
 
         st.session_state.runnable = agent
         st.session_state.state = ChatState(messages=[])
 
+def run_async(coro):
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    return loop.run_until_complete(coro)
+
 def main():
-    st.title("AI Assistant")
+    st.subheader("Try asking: search for Sophie Muller")
 
     initialize_session()
 
-    # Display chat history
     for message in st.session_state.state['messages']:
         if isinstance(message, HumanMessage):
             st.chat_message("human").write(message.content)
-        else:
+        elif isinstance(message, AIMessage):
             st.chat_message("assistant").write(message.content)
 
-    # Get user input
-    user_input = st.chat_input("Type your message here...")
+    user_input = st.chat_input("Try asking to search for Sophie Muller, then ask follow up questions")
 
     if user_input:
-        # Append the new message to the state
         st.session_state.state['messages'] += [HumanMessage(content=user_input)]
 
-        # Create a placeholder for the assistant's response
         with st.chat_message("assistant"):
             message_placeholder = st.empty()
             full_response = ""
 
-            # Stream the response
-            for event in st.session_state.runnable.stream_events(st.session_state.state, version="v1", config={'configurable': {'thread_id': 'thread-1'}}):
-                if event["event"] == "on_chat_model_stream":
-                    c = event["data"]["chunk"].content
-                    if c and len(c) > 0 and isinstance(c[0], dict) and c[0]["type"] == "text":
-                        content = c[0]["text"]
-                    elif isinstance(c, str):
-                        content = c
-                    else:
-                        content = ""
-                    full_response += content
-                    message_placeholder.markdown(full_response + "▌")
+            async def process_stream():
+                nonlocal full_response
+                async for event in st.session_state.runnable.astream_events(
+                    st.session_state.state,
+                    version="v1",
+                    config={'configurable': {'thread_id': 'thread-1'}}
+                ):
+                    if event["event"] == "on_chat_model_stream":
+                        c = event["data"]["chunk"].content
+                        if c and len(c) > 0 and isinstance(c[0], dict) and c[0]["type"] == "text":
+                            content = c[0]["text"]
+                        elif isinstance(c, str):
+                            content = c
+                        else:
+                            content = ""
+                        full_response += content
+                        message_placeholder.markdown(full_response + "▌")
 
-            # Update the placeholder with the full response
+            run_async(process_stream())
+
             message_placeholder.markdown(full_response)
 
-        # Append the assistant's response to the state
-        st.session_state.state['messages'] += [HumanMessage(content=full_response)]
+        st.session_state.state['messages'] += [AIMessage(content=full_response)]
 
 if __name__ == "__main__":
     main()
