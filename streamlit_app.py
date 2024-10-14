@@ -23,23 +23,12 @@ from tilores import TiloresAPI
 from langchain_tilores import TiloresTools
 
 # Show title and description.
-st.title("💬 IdentityRAG using Tilores")
+st.title("IdentityRAG using Tilores 💬")
 st.write(
-    "This demo demonstrates how connecting an LLM to Tilores, an entity resolution system, "
-    "via IdentityRAG improves data analysis by resolving ambiguities. "
-    "Tilores identifies and merges duplicate or inconsistent records, "
-    "while the LLM provides accurate insights using the clean, disambiguated data. "
-    "This approach leads to more precise and context-aware analysis."
+    "This demo shows how to use Tilores IdentityRAG with a Large Language Model (LLM) to create an internal customer service chat bot, based on customer data from scattered internal sources. This can work with any internal or externally sourced data."
 )
 st.write(
-    "Want to use your own data? setup your own [here](https://app.tilores.io)."
-)
-st.write(
-    "Or reach out to us by email: identityrag@tilores.io or use the chat on [tilores.io](https://tilores.io/RAG)"
-)
-
-st.write(
-    "We will help you setup your own app while keeping your data secured."
+    "Want to use your own data? Contact Us by email:identityrag@tilores.io or visit [tilores.io](https://tilores.io/RAG?utm_source=streamlit&utm_medium=embed&utm_campaign=identityrag-demo)."
 )
 
 class HumanInputStreamlit(BaseTool):
