@@ -28,7 +28,7 @@ st.write(
     "This demo shows how to use Tilores IdentityRAG with a Large Language Model (LLM) to create an internal customer service chat bot, based on customer data from scattered internal sources. This can work with any internal or externally sourced data."
 )
 st.write(
-    "Want to use your own data? Contact Us by email:identityrag@tilores.io or visit [tilores.io](https://tilores.io/RAG?utm_source=streamlit&utm_medium=embed&utm_campaign=identityrag-demo)."
+    "Want to use your own data? Contact Us by email: identityrag@tilores.io or visit [tilores.io](https://tilores.io/RAG?utm_source=streamlit&utm_medium=embed&utm_campaign=identityrag-demo)."
 )
 
 class HumanInputStreamlit(BaseTool):
@@ -92,8 +92,6 @@ def initialize_session():
         tools = [
             HumanInputStreamlit(),
             tilores_tools.search_tool(),
-            # Note: pdf_tool is not defined in the original code, so I've commented it out
-            # pdf_tool,
         ]
         memory = MemorySaver()
         agent = create_react_agent(llm, tools, checkpointer=memory)
@@ -120,7 +118,7 @@ def main():
             st.chat_message("assistant").write(message.content)
 
     # Get user input
-    user_input = st.chat_input("Try asking to search for Sophie Muller, then ask follow up questions")
+    user_input = st.chat_input("Try asking 'search for Sophie Muller', then ask follow-up questions")
 
     if user_input:
         # Display the new user message immediately
@@ -136,33 +134,52 @@ def main():
         else:
             state_for_llm = st.session_state.state
 
-        # Create a placeholder for the assistant's response
-        with st.chat_message("assistant"):
-            message_placeholder = st.empty()
-            full_response = ""
+        # Create placeholders for the assistant's response and agent questions
+        assistant_placeholder = st.empty()
+        agent_question_placeholder = st.empty()
 
-            async def process_stream():
-                nonlocal full_response
-                async for event in st.session_state.runnable.astream_events(
-                    state_for_llm,
-                    version="v1",
-                    config={'configurable': {'thread_id': 'thread-1'}}
-                ):
-                    if event["event"] == "on_chat_model_stream":
-                        c = event["data"]["chunk"].content
-                        if c and len(c) > 0 and isinstance(c[0], dict) and c[0]["type"] == "text":
-                            content = c[0]["text"]
-                        elif isinstance(c, str):
-                            content = c
-                        else:
-                            content = ""
-                        full_response += content
-                        message_placeholder.markdown(full_response + "▌")
+        full_response = ""
+        agent_question = ""
 
-            run_async(process_stream())
+        async def process_stream():
+            nonlocal full_response, agent_question
+            async for event in st.session_state.runnable.astream_events(
+                state_for_llm,
+                version="v1",
+                config={'configurable': {'thread_id': 'thread-1'}}
+            ):
+                if event["event"] == "on_chat_model_stream":
+                    c = event["data"]["chunk"].content
+                    if c and len(c) > 0 and isinstance(c[0], dict) and c[0]["type"] == "text":
+                        content = c[0]["text"]
+                    elif isinstance(c, str):
+                        content = c
+                    else:
+                        content = ""
+                    full_response += content
+                    with assistant_placeholder.container():
+                        st.markdown(full_response + "▌")
+                elif event["event"] == "on_tool_start":
+                    tool_name = event["name"]
+                    tool_input = event["data"]["input"]
+                    if tool_name == "human":
+                        agent_question = tool_input
+                        with agent_question_placeholder.container():
+                            st.info(f"Agent question: {agent_question}")
+                            user_answer = st.text_input("Your answer:")
+                            if user_answer:
+                                return user_answer
 
-            # Update the placeholder with the full response
-            message_placeholder.markdown(full_response)
+        while True:
+            user_answer = run_async(process_stream())
+            if user_answer:
+                st.session_state.state['messages'] += [HumanMessage(content=user_answer)]
+            else:
+                break
+
+        # Update the assistant's response
+        with assistant_placeholder.container():
+            st.markdown(full_response)
 
         # Append the assistant's response to the state
         st.session_state.state['messages'] += [AIMessage(content=full_response)]
