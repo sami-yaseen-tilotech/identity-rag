@@ -1,8 +1,10 @@
-# 💬 Chatbot template
+# IdentityRAG using Tilores 💬
 
-A simple Streamlit app that shows how to build a chatbot using OpenAI's GPT-3.5.
+This demo shows how to use Tilores IdentityRAG with a Large Language Model (LLM) to create an internal customer service chat bot, based on customer data from scattered internal sources. This can work with any internal or externally sourced data.
 
-[![Open in Streamlit](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://chatbot-template.streamlit.app/)
+Want to use your own data? Contact Us by email:identityrag@tilores.io or visit tilores.io.
+
+Try asking: search for Sophie Muller
 
 ### How to run it on your own machine
 
