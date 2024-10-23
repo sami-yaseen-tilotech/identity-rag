@@ -106,7 +106,7 @@ def run_async(coro):
     return loop.run_until_complete(coro)
 
 def main():
-    st.subheader("Try asking: search for Sophie Muller")
+    st.subheader("Try asking: 'search for Sophie Muller'")
 
     initialize_session()
 
