@@ -22,6 +22,10 @@ from langchain.tools import Tool
 from tilores import TiloresAPI
 from langchain_tilores import TiloresTools
 
+# Plotly
+import plotly.graph_objects as go
+from plotly.io import from_json
+
 # Show title and description.
 st.title("IdentityRAG using Tilores 💬")
 st.write(
@@ -73,16 +77,25 @@ def initialize_session():
         llm_provider = os.environ.get("LLM_PROVIDER", "OpenAI").lower()
         
         if llm_provider == "bedrock":
-            llm = ChatBedrock(
-                credentials_profile_name=None,
-                aws_access_key_id=os.environ["AWS_ACCESS_KEY_ID"],
-                aws_secret_access_key=os.environ["AWS_SECRET_ACCESS_KEY"],
-                aws_session_token=os.getenv("AWS_SESSION_TOKEN"),
-                region_name=os.environ["BEDROCK_REGION"],
-                model_id=os.environ["BEDROCK_MODEL_ID"],
-                streaming=True,
-                model_kwargs={"temperature": 0},
-            )
+            if os.environ.get("BEDROCK_CREDENTIALS_PROFILE_NAME"):
+                llm = ChatBedrock(
+                    credentials_profile_name=os.environ["BEDROCK_CREDENTIALS_PROFILE_NAME"],
+                    region_name=os.environ["BEDROCK_REGION"],
+                    model_id=os.environ["BEDROCK_MODEL_ID"],
+                    streaming=True,
+                    model_kwargs={"temperature": 0},
+                )
+            else:
+                llm = ChatBedrock(
+                    credentials_profile_name=None,
+                    aws_access_key_id=os.environ["AWS_ACCESS_KEY_ID"],
+                    aws_secret_access_key=os.environ["AWS_SECRET_ACCESS_KEY"],
+                    aws_session_token=os.getenv("AWS_SESSION_TOKEN"),
+                    region_name=os.environ["BEDROCK_REGION"],
+                    model_id=os.environ["BEDROCK_MODEL_ID"],
+                    streaming=True,
+                    model_kwargs={"temperature": 0},
+                )
         else:  # Default to OpenAI
             model_name = os.environ.get("OPENAI_MODEL_NAME", "gpt-4o-mini")
             llm = ChatOpenAI(temperature=0, streaming=True, model_name=model_name)
@@ -92,6 +105,9 @@ def initialize_session():
         tools = [
             HumanInputStreamlit(),
             tilores_tools.search_tool(),
+            tilores_tools.edge_tool(),
+            pdf_tool,
+            plotly_tool,
         ]
         memory = MemorySaver()
         agent = create_react_agent(llm, tools, checkpointer=memory)
@@ -116,6 +132,8 @@ def main():
             st.chat_message("human").write(message.content)
         elif isinstance(message, AIMessage):
             st.chat_message("assistant").write(message.content)
+        elif isinstance(message, go.Figure):
+            st.plotly_chart(message, use_container_width=True)
 
     # Get user input
     user_input = st.chat_input("Try asking 'search for Sophie Muller', then ask follow-up questions")
@@ -140,14 +158,18 @@ def main():
 
         full_response = ""
         agent_question = ""
+        figure = None
 
         async def process_stream():
-            nonlocal full_response, agent_question
+            nonlocal full_response, agent_question, figure
             async for event in st.session_state.runnable.astream_events(
                 state_for_llm,
                 version="v1",
                 config={'configurable': {'thread_id': 'thread-1'}}
             ):
+                if event["event"] == "on_tool_end":
+                    if event["data"].get("output") and event["data"].get("output").artifact:
+                        figure = from_json(event["data"].get("output").artifact)
                 if event["event"] == "on_chat_model_stream":
                     c = event["data"]["chunk"].content
                     if c and len(c) > 0 and isinstance(c[0], dict) and c[0]["type"] == "text":
@@ -180,9 +202,47 @@ def main():
         # Update the assistant's response
         with assistant_placeholder.container():
             st.markdown(full_response)
+            if figure:
+                st.plotly_chart(figure, use_container_width=True)
 
         # Append the assistant's response to the state
         st.session_state.state['messages'] += [AIMessage(content=full_response)]
+        if figure:
+            st.session_state.state["messages"] += [figure]
+
+def load_pdf_from_url(url: str):
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3'
+    }
+    response = requests.get(url, headers=headers)
+    if response.status_code == 200:
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as temp_pdf:
+            temp_pdf.write(response.content)
+        
+        loader = UnstructuredPDFLoader(temp_pdf.name)
+        documents = loader.load()
+        return documents
+    else:
+        raise Exception(f"Failed to download PDF from {url}. Status code: {response.status_code}")
+
+pdf_tool = Tool(
+    name = "load_pdf",
+    func=load_pdf_from_url,
+    description="useful for when you need to download and process a PDF file from a given URL"
+)
+
+def render_plotly_graph(figureCode: str):
+    local_vars = {}
+    exec(figureCode, {"go": go}, local_vars)
+    fig = local_vars.get("fig")
+    return "generated a chart from the provided figure", fig.to_json()
+
+plotly_tool = Tool(
+    name = "plotly_tool",
+    func=render_plotly_graph,
+    description="useful for when you need to render a graph using plotly; the figureCode must only import plotly.graph_objects as go and must provide a local variable named fig as a result",
+    response_format='content_and_artifact'
+)
 
 if __name__ == "__main__":
     main()
