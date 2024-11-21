@@ -20,7 +20,7 @@ from langchain.tools import Tool
 
 # Tilores
 from tilores import TiloresAPI
-from langchain_tilores import TiloresTools
+from tilores_langchain import TiloresTools
 
 # Plotly
 import plotly.graph_objects as go
